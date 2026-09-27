@@ -37,3 +37,48 @@ jobs:
         with:
           name: installer-package
           path: package-neko.tar
+
+  build-musl:
+    runs-on: codeberg-medium
+    container:
+      image: 'ghcr.io/void-linux/void-mklive:20250116R1'
+      options: --privileged
+      volumes:
+        - /dev:/dev
+      env:
+        PATH: '/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/sbin:/usr/local/bin:/tmp/bin'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          path: neko
+
+      # Same source, musl libc: bootstrap the official musl ROOTFS and
+      # compile natively inside it (chroot, no cross toolchain needed).
+      - name: Bootstrap musl rootfs
+        run: |
+          mkdir -p /tmp/muslroot
+          curl -fsSL https://repo-default.voidlinux.org/live/current/void-x86_64-musl-ROOTFS-20250202.tar.xz -o /tmp/musl-rootfs.tar.xz
+          tar -xpf /tmp/musl-rootfs.tar.xz -C /tmp/muslroot
+          cp /etc/resolv.conf /tmp/muslroot/etc/resolv.conf
+          mkdir -p /tmp/muslroot/root/neko
+          cp -a "$GITHUB_WORKSPACE/neko/." /tmp/muslroot/root/neko/
+          mount --bind /dev /tmp/muslroot/dev
+          mount -t proc proc /tmp/muslroot/proc
+          mount -t sysfs sys /tmp/muslroot/sys
+
+      - name: Compile project (musl)
+        run: |
+          chroot /tmp/muslroot /bin/sh -c "xbps-install -Syu && xbps-install -y gcc make meson ninja gtk4-devel pkg-config && cd /root/neko && meson setup build && meson compile -C build"
+
+      - name: Create tarball
+        run: |
+          cp -a /tmp/muslroot/root/neko/build ./build-musl
+          tar -cvf package-neko-musl.tar ./build-musl
+
+      - name: Upload artifact
+        uses: https://code.forgejo.org/actions/upload-artifact@v3
+        with:
+          name: installer-package-musl
+          path: package-neko-musl.tar

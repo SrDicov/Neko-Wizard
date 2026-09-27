@@ -16,13 +16,19 @@ typedef enum {
 typedef struct {
     const char *name;
     const char *icon_path;
-    const char *install_command;
+    const char *install_command;       /* glibc method */
+    const char *install_command_musl;  /* musl method, NULL = not available on musl */
     AppGroup group;
     gboolean selected;
     gboolean install_success;
 } AppInfo;
 
-GList *get_all_apps(void);
+GList *get_all_apps(void);   /* already filtered for the running libc */
 gchar *get_resource_path(const char *rel_path);
+
+/* Runtime libc detection (confstr fails on musl). Memoized. */
+gboolean neko_is_musl(void);
+/* Effective install command for this host (musl column when musl, else glibc). */
+const char *neko_app_command(const AppInfo *info);
 
 #endif

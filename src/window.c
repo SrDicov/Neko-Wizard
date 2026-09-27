@@ -71,6 +71,17 @@ struct _NekoStoreWindow {
     GtkWidget *mirror_page;
     GtkWidget *mirror_status_label;
     MirrorInfo *selected_mirror;
+    GList *mirror_radios;   /* check buttons, same order as get_mirrors_for_libc() */
+
+    // Mirror benchmark: every mirror tested BENCH_ROUNDS times (round-major
+    // order, up to BENCH_PAR probes in flight), ranked by (fails, avg ms).
+    GtkWidget *bench_btn;
+    gboolean bench_running;
+    int bench_done;
+    int bench_total;
+    int bench_inflight;
+    GArray *bench_rows;     /* BenchRow, index-aligned with mirror_radios */
+    GQueue *bench_queue;    /* pending row indexes, round-major */
 
     // Installer State
     GList *apps_to_install;
@@ -286,7 +297,7 @@ static void install_next_app(NekoStoreWindow *self) {
         g_free(status);
         term_log("Installing %s...", info->name);
 
-        install_app_async(info->install_command, install_progress_cb, install_finished_cb, self);
+        install_app_async(neko_app_command(info), install_progress_cb, install_finished_cb, self);
     } else {
         // Finished everything
         self->installing = FALSE;
@@ -693,6 +704,155 @@ static void test_finished_cb(gboolean success, gpointer user_data) {
     }
 }
 
+/* --- Mirror benchmark: every mirror, BENCH_ROUNDS samples each -------------
+ * Round-major order (all mirrors round 1, then round 2...) with up to
+ * BENCH_PAR probes in flight, reusing install_app_async. Ranked by
+ * (failures, avg connect ms): fastest AND most stable wins, then it is
+ * auto-selected. ---------------------------------------------------------- */
+#define BENCH_ROUNDS 10
+#define BENCH_PAR 6
+
+typedef struct {
+    MirrorInfo *mirror;
+    GtkWidget *radio;
+    double total_ms;
+    int ok;
+    int fail;
+} BenchRow;
+
+typedef struct {
+    NekoStoreWindow *self;
+    int row;
+    gboolean got_ok;
+} BenchTask;
+
+static char *bench_mirror_url(MirrorInfo *mirror) {
+    const char *base = mirror->url;
+    size_t len = strlen(base);
+    if (len > 0 && base[len - 1] == '/')
+        return g_strdup(base);
+    return g_strdup_printf("%s/", base);
+}
+
+static void bench_launch_more(NekoStoreWindow *self);
+
+static void bench_progress_cb(const char *line, gpointer user_data) {
+    BenchTask *t = user_data;
+    if (!t->self->bench_running || !t->self->bench_rows)
+        return;
+    BenchRow *r = &g_array_index(t->self->bench_rows, BenchRow, t->row);
+    if (line && g_str_has_prefix(line, "OK:")) {
+        char **parts = g_strsplit(line, ":", 3);
+        if (parts && parts[2]) {
+            r->total_ms += g_ascii_strtod(parts[2], NULL) * 1000.0;
+            r->ok++;
+            t->got_ok = TRUE;
+        }
+        g_strfreev(parts);
+    }
+}
+
+static void bench_finished_cb(gboolean success, gpointer user_data) {
+    BenchTask *t = user_data;
+    NekoStoreWindow *self = t->self;
+    (void)success;
+    if (!self->bench_running || !self->bench_rows) {
+        g_free(t);
+        return;
+    }
+    BenchRow *r = &g_array_index(self->bench_rows, BenchRow, t->row);
+    if (!t->got_ok)
+        r->fail++;
+    g_free(t);
+    self->bench_inflight--;
+    self->bench_done++;
+    bench_launch_more(self);
+}
+
+static void bench_finish(NekoStoreWindow *self) {
+    int best = -1;
+    for (guint i = 0; i < self->bench_rows->len; i++) {
+        BenchRow *r = &g_array_index(self->bench_rows, BenchRow, i);
+        if (best < 0)
+            best = i;
+        else {
+            BenchRow *b = &g_array_index(self->bench_rows, BenchRow, best);
+            double ravg = r->ok ? r->total_ms / r->ok : G_MAXDOUBLE;
+            double bavg = b->ok ? b->total_ms / b->ok : G_MAXDOUBLE;
+            if (r->fail < b->fail || (r->fail == b->fail && ravg < bavg))
+                best = i;
+        }
+    }
+    BenchRow *w = &g_array_index(self->bench_rows, BenchRow, best);
+    self->selected_mirror = w->mirror;
+    gtk_check_button_set_active(GTK_CHECK_BUTTON(w->radio), TRUE);
+    double avg = w->ok ? w->total_ms / w->ok : 0;
+    char *status = g_strdup_printf("Fastest: %s (avg %.0fms, %d/%d ok) — selected",
+                                   w->mirror->name, avg, w->ok, w->ok + w->fail);
+    gtk_label_set_text(GTK_LABEL(self->mirror_status_label), status);
+    g_free(status);
+    g_array_free(self->bench_rows, TRUE);
+    g_queue_free(self->bench_queue);
+    self->bench_rows = NULL;
+    self->bench_queue = NULL;
+    self->bench_running = FALSE;
+    gtk_widget_set_sensitive(self->bench_btn, TRUE);
+}
+
+static void bench_launch_more(NekoStoreWindow *self) {
+    if (!self->bench_running)
+        return;
+    if (self->bench_done >= self->bench_total) {
+        bench_finish(self);
+        return;
+    }
+    char *status = g_strdup_printf("Benchmarking… %d/%d (round %d/%d)",
+                                   self->bench_done, self->bench_total,
+                                   self->bench_done / (int)self->bench_rows->len + 1, BENCH_ROUNDS);
+    gtk_label_set_text(GTK_LABEL(self->mirror_status_label), status);
+    g_free(status);
+    while (self->bench_inflight < BENCH_PAR && !g_queue_is_empty(self->bench_queue)) {
+        int idx = GPOINTER_TO_INT(g_queue_pop_head(self->bench_queue));
+        BenchRow *r = &g_array_index(self->bench_rows, BenchRow, idx);
+        BenchTask *t = g_new0(BenchTask, 1);
+        t->self = self;
+        t->row = idx;
+        char *url = bench_mirror_url(r->mirror);
+        char *command = g_strdup_printf(
+            "curl -s --connect-timeout 5 --max-time 10 -o /dev/null -w \"OK:%%{http_code}:%%{time_connect}\" \"%s\" 2>/dev/null || echo \"FAIL\"",
+            url);
+        install_app_async(command, bench_progress_cb, bench_finished_cb, t);
+        g_free(command);
+        g_free(url);
+        self->bench_inflight++;
+    }
+}
+
+static void on_bench_clicked(GtkButton *btn, gpointer user_data) {
+    NekoStoreWindow *self = NEKO_STORE_WINDOW(user_data);
+    (void)btn;
+    if (self->bench_running)
+        return;
+    if (!self->mirror_radios)
+        return;
+    self->bench_rows = g_array_new(FALSE, FALSE, sizeof(BenchRow));
+    for (GList *l = self->mirror_radios; l != NULL; l = l->next) {
+        GtkWidget *radio = GTK_WIDGET(l->data);
+        BenchRow row = { g_object_get_data(G_OBJECT(radio), "mirror"), radio, 0, 0, 0 };
+        g_array_append_val(self->bench_rows, row);
+    }
+    self->bench_queue = g_queue_new();
+    for (int round = 0; round < BENCH_ROUNDS; round++)
+        for (guint i = 0; i < self->bench_rows->len; i++)
+            g_queue_push_tail(self->bench_queue, GINT_TO_POINTER(i));
+    self->bench_running = TRUE;
+    self->bench_done = 0;
+    self->bench_total = BENCH_ROUNDS * self->bench_rows->len;
+    self->bench_inflight = 0;
+    gtk_widget_set_sensitive(self->bench_btn, FALSE);
+    bench_launch_more(self);
+}
+
 static void on_test_mirror_clicked(GtkButton *btn, gpointer user_data) {
     NekoStoreWindow *self = NEKO_STORE_WINDOW(user_data);
     MirrorInfo *mirror = g_object_get_data(G_OBJECT(btn), "mirror");
@@ -758,7 +918,16 @@ static void build_mirror_page(NekoStoreWindow *self) {
     gtk_widget_set_margin_end(header, PAGE_PAD);
     gtk_box_append(GTK_BOX(vbox), header);
 
-    GtkWidget *desc = gtk_label_new("Select a Void Linux mirror to use for installations. Test connectivity to find the fastest mirror.");
+    GtkWidget *desc = gtk_label_new(NULL);
+    {
+        /* First-run analysis, visible: detect libc, then offer its mirrors. */
+        char *d = g_strdup_printf("Detected libc: %s — mirrors below serve it "
+                                  "(xmirror picks current/ or current/musl/). "
+                                  "Test one, or benchmark all for the fastest.",
+                                  neko_is_musl() ? "musl" : "glibc");
+        gtk_label_set_text(GTK_LABEL(desc), d);
+        g_free(d);
+    }
     gtk_widget_add_css_class(desc, "page-desc");
     gtk_widget_set_margin_top(desc, 4);
     gtk_widget_set_margin_start(desc, PAGE_PAD);
@@ -781,7 +950,7 @@ static void build_mirror_page(NekoStoreWindow *self) {
     int current_tier = 0;
     gboolean first_mirror = TRUE;
 
-    GList *mirrors = get_all_mirrors();
+    GList *mirrors = get_mirrors_for_libc(neko_is_musl());
     for (GList *l = mirrors; l != NULL; l = l->next) {
         MirrorInfo *mirror = (MirrorInfo *)l->data;
 
@@ -819,6 +988,7 @@ static void build_mirror_page(NekoStoreWindow *self) {
         }
         g_object_set_data(G_OBJECT(radio), "mirror", mirror);
         g_signal_connect(radio, "toggled", G_CALLBACK(on_mirror_selected), self);
+        self->mirror_radios = g_list_append(self->mirror_radios, radio);
         gtk_box_append(GTK_BOX(row), radio);
 
         GtkWidget *info_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
@@ -876,6 +1046,11 @@ static void build_mirror_page(NekoStoreWindow *self) {
     gtk_widget_add_css_class(back_btn, "suggested-action");
     g_signal_connect(back_btn, "clicked", G_CALLBACK(go_to_welcome_page), self);
     gtk_box_append(GTK_BOX(footer), back_btn);
+
+    self->bench_btn = gtk_button_new_with_label("Find fastest");
+    gtk_widget_add_css_class(self->bench_btn, "suggested-action");
+    g_signal_connect(self->bench_btn, "clicked", G_CALLBACK(on_bench_clicked), self);
+    gtk_box_append(GTK_BOX(footer), self->bench_btn);
 
     GtkWidget *spacer = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     gtk_widget_set_hexpand(spacer, TRUE);
@@ -937,6 +1112,15 @@ static void neko_store_window_dispose(GObject *object) {
         g_list_free(self->apps_to_install);
         self->apps_to_install = NULL;
     }
+    g_list_free(self->mirror_radios);
+    self->mirror_radios = NULL;
+    self->bench_running = FALSE;
+    if (self->bench_rows)
+        g_array_free(self->bench_rows, TRUE);
+    self->bench_rows = NULL;
+    if (self->bench_queue)
+        g_queue_free(self->bench_queue);
+    self->bench_queue = NULL;
     g_clear_object(&theme_monitor);
     g_clear_object(&theme_provider);
     G_OBJECT_CLASS(neko_store_window_parent_class)->dispose(object);

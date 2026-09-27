@@ -56,3 +56,8 @@ GList *get_all_mirrors(void) {
     }
     return list;
 }
+
+GList *get_mirrors_for_libc(gboolean musl) {
+    (void)musl;
+    return get_all_mirrors();
+}
