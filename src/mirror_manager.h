@@ -12,5 +12,10 @@ typedef struct {
 } MirrorInfo;
 
 GList *get_all_mirrors(void);
+/* Per-libc mirror list. Mirror roots serve both libcs (xmirror resolves
+ * current/ vs current/musl/ on each host), so both tables share the same
+ * entries today; the split exists so a musl-less mirror can be dropped
+ * without touching callers. */
+GList *get_mirrors_for_libc(gboolean musl);
 
 #endif
