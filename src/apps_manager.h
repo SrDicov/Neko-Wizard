@@ -30,5 +30,7 @@ gchar *get_resource_path(const char *rel_path);
 gboolean neko_is_musl(void);
 /* Effective install command for this host (musl column when musl, else glibc). */
 const char *neko_app_command(const AppInfo *info);
+/* Remote installer script for this host (single-prompt batch entry point). */
+const char *neko_script_url(void);
 
 #endif

@@ -22,6 +22,20 @@
 
 set -u
 
+# Single-prompt batch mode: the app runs `pkexec bash install.sh id1 id2...`
+# once, so nested pkexec calls become no-ops and user-level tasks drop back
+# to the invoking user instead of landing in /root.
+if [ "$(id -u)" = 0 ]; then
+    pkexec() { "$@"; }
+    # ponytail: awk-on-/etc/passwd ceiling — no getent on musl; assumes
+    # polkit launch, a raw root shell without PKEXEC_UID runs user tasks as root.
+    _USER_HOME="$(awk -F: -v u="${PKEXEC_UID:-0}" '$3==u{print $6; exit}' /etc/passwd)"
+    [ -n "$_USER_HOME" ] || _USER_HOME="$HOME"
+    as_user() { runuser -u "#${PKEXEC_UID:-0}" -- env HOME="$_USER_HOME" "$@"; }
+else
+    as_user() { "$@"; }
+fi
+
 log() { printf '[neko] %s\n' "$*"; }
 die() { printf '[neko] ERROR: %s\n' "$*" >&2; exit 1; }
 
@@ -71,10 +85,10 @@ arxy_official() { # <pkg...> : Arch official repos (needs root)
     pkexec arxy install "$@" || die "arxy install failed"
 }
 
-arxy_aur() { # <pkg> : AUR -bin, runs as user (arxy elevates itself)
+arxy_aur() { # <pkg> : AUR -bin, builds as user (arxy elevates itself)
     ensure_arxy
     log "Installing $1 via arxy (AUR)..."
-    arxy install --aur "$1" || die "arxy AUR install failed (needs working sudo/doas for the user)"
+    as_user arxy install --aur "$1" || die "arxy AUR install failed (needs working sudo/doas for the user)"
 }
 
 # ------------------------------------------------------------------------------
@@ -131,6 +145,8 @@ install_faugus() {
 # ------------------------------------------------------------------------------
 
 install_reaper() {
+    # Tarball into ~/opt: user-level, re-run as the invoking user under batch.
+    if [ "$(id -u)" = 0 ] && [ -n "${PKEXEC_UID:-}" ]; then as_user bash "$0" __single reaper; return $?; fi
     log "Installing Reaper (Tarball)..."
     curl -L -o /tmp/reaper.tar.xz https://github.com/Neko-Void-Linux/Neko-Wizard/releases/download/tars/reaper779_linux_x86_64.tar.xz && \
     tar -xf /tmp/reaper.tar.xz -C /tmp && \
@@ -241,6 +257,8 @@ install_chromium() {
 # ------------------------------------------------------------------------------
 
 install_onlyoffice() {
+    # AppImage pair: user-level, re-run as the invoking user under batch.
+    if [ "$(id -u)" = 0 ] && [ -n "${PKEXEC_UID:-}" ]; then as_user bash "$0" __single onlyoffice; return $?; fi
     # OnlyOffice ships as an AppImage; AppImageLauncher Lite integrates it into
     # the desktop menu. Both are user-level (no pkexec needed).
     # Note: "cli integrate" works without systemd (important on Void/runit).
@@ -317,9 +335,8 @@ install_gufw() {
 # Dispatcher
 # ------------------------------------------------------------------------------
 
-APP="${1:-}"
-
-case "$APP" in
+install_one() { # <app-id>, exit status = success/failure
+case "${1:-}" in
     steam)         install_steam ;;
     portproton)    install_portproton ;;
     heroic)        install_heroic ;;
@@ -364,14 +381,30 @@ case "$APP" in
 
     gufw)          install_gufw ;;
 
-    list)          list_apps ;;
-    help|-h|--help) usage ;;
-    "")            die "Missing app-id. Usage: $0 <app-id> (or '$0 list' to see the available ids)" ;;
-    *)             die "Unknown app-id: '$APP'. Run '$0 list' to see the available ids." ;;
+    list)          list_apps; exit 0 ;;
+    help|-h|--help) usage; exit 0 ;;
+    "")            die "Missing app-id. Usage: $0 <app-id>... (or '$0 list' to see the available ids)" ;;
+    *)             die "Unknown app-id: '$1'. Run '$0 list' to see the available ids." ;;
 esac
-rc=$?
+}
 
-if [ "$rc" -ne 0 ]; then
-    printf '[neko] Installation of "%s" failed (exit code %s).\n' "$APP" "$rc" >&2
+case "${1:-}" in
+    list|help|-h|--help) install_one "$1" ;;
+    "")            die "Missing app-id. Usage: $0 <app-id>... (or '$0 list' to see the available ids)" ;;
+    __single)      install_one "${2:-}"; exit "$?" ;;
+esac
+
+# Batch: one pkexec session covers every id; markers keep the per-app report.
+fails=0
+for APP in "$@"; do
+    if ( install_one "$APP" ); then
+        printf '[neko] NEKO_OK %s\n' "$APP"
+    else
+        printf '[neko] NEKO_FAIL %s\n' "$APP"
+        fails=$((fails + 1))
+    fi
+done
+if [ "$fails" -ne 0 ]; then
+    printf '[neko] %s installation(s) failed.\n' "$fails" >&2
+    exit 1
 fi
-exit "$rc"

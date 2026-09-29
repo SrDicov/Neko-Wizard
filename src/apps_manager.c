@@ -38,6 +38,12 @@ neko_app_command(const AppInfo *info)
     return info->install_command;
 }
 
+const char *
+neko_script_url(void)
+{
+    return neko_is_musl() ? NEKO_SCRIPT_URL_MUSL : NEKO_SCRIPT_URL;
+}
+
 static AppInfo apps[] = {
     // Gaming
     {"Steam", "steam.png", INSTALL_APP("steam"), INSTALL_APP_MUSL("steam"), GROUP_GAMING, FALSE, FALSE},
