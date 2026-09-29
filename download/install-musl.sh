@@ -104,7 +104,7 @@ install_hytale() {
 }
 
 install_trinity() {
-    # Native package from z-repo-musl (no flatpak on musl builds).
+    # Native package from z-repo-musl.
     log "Installing Trinity Launcher..."
     pkexec xbps-install -Sy trinity-launcher-ap
 }
@@ -197,9 +197,8 @@ install_inkscape() {
 # ------------------------------------------------------------------------------
 
 install_spotify() {
-    # No proprietary client on musl: native open client from official repos.
-    log "Installing Spotify client..."
-    pkexec xbps-install -Sy spotify-player
+    # Musl: proprietary client only exists as AUR; via arxy (as user).
+    arxy_aur spotify
 }
 
 install_vesktop() {
