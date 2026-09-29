@@ -677,7 +677,7 @@ static void on_mirror_selected(GtkCheckButton *btn, gpointer user_data) {
 static void test_progress_cb(const char *line, gpointer user_data) {
     NekoStoreWindow *self = NEKO_STORE_WINDOW(user_data);
     if (line && g_utf8_validate(line, -1, NULL)) {
-        if (g_str_has_prefix(line, "OK:")) {
+        if (g_str_has_prefix(line, "OK:2")) {
             char **parts = g_strsplit(line, ":", 3);
             if (parts && parts[0] && parts[1] && parts[2]) {
                 double connect_time = g_ascii_strtod(parts[2], NULL);
@@ -685,6 +685,13 @@ static void test_progress_cb(const char *line, gpointer user_data) {
                 gtk_label_set_text(GTK_LABEL(self->mirror_status_label), status);
                 g_free(status);
             }
+            g_strfreev(parts);
+        } else if (g_str_has_prefix(line, "OK:")) {
+            char **parts = g_strsplit(line, ":", 3);
+            char *status = g_strdup_printf("✗ Unreachable (HTTP %s)",
+                                           (parts && parts[1]) ? parts[1] : "?");
+            gtk_label_set_text(GTK_LABEL(self->mirror_status_label), status);
+            g_free(status);
             g_strfreev(parts);
         } else if (g_str_equal(line, "FAIL")) {
             gtk_label_set_text(GTK_LABEL(self->mirror_status_label), "✗ Unreachable");
@@ -741,7 +748,9 @@ static void bench_progress_cb(const char *line, gpointer user_data) {
     if (!t->self->bench_running || !t->self->bench_rows)
         return;
     BenchRow *r = &g_array_index(t->self->bench_rows, BenchRow, t->row);
-    if (line && g_str_has_prefix(line, "OK:")) {
+    /* curl -w prints even on failure ("OK:000:0.000000"): only 2xx counts,
+     * otherwise dead mirrors score 0ms and "win". */
+    if (line && g_str_has_prefix(line, "OK:2")) {
         char **parts = g_strsplit(line, ":", 3);
         if (parts && parts[2]) {
             r->total_ms += g_ascii_strtod(parts[2], NULL) * 1000.0;
