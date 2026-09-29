@@ -9,9 +9,9 @@
  * It stays up to date after every push to main, no rebuild needed. */
 #define NEKO_SCRIPT_URL "https://raw.githubusercontent.com/Neko-Void-Linux/Neko-Wizard/main/download/install.sh"
 #define INSTALL_APP(id) "curl -fsSL -o /tmp/neko-install.sh " NEKO_SCRIPT_URL " && bash /tmp/neko-install.sh " id
-/* Single repo, two libcs: same app-ids, musl recipe lives in the musl twin
- * repo until the trees merge (then this becomes download/install-musl.sh). */
-#define NEKO_SCRIPT_URL_MUSL "https://raw.githubusercontent.com/Neko-Void-Linux/Neko-Wizard-Musl/main/download/install.sh"
+/* Single repo, two libcs: same app-ids, musl recipe ships in
+ * download/install-musl.sh of this same repo. */
+#define NEKO_SCRIPT_URL_MUSL "https://raw.githubusercontent.com/SrDicov/Neko-Wizard/main/download/install-musl.sh"
 #define INSTALL_APP_MUSL(id) "curl -fsSL -o /tmp/neko-install.sh " NEKO_SCRIPT_URL_MUSL " && bash /tmp/neko-install.sh " id
 
 gboolean
