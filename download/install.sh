@@ -290,20 +290,29 @@ install_libreoffice() {
     pkexec xbps-install -Sy libreoffice
 }
 
+# Invoking user even inside the single-pkexec batch (where $USER is root).
+_real_user() { if [ -n "${PKEXEC_UID:-}" ]; then id -nu "$PKEXEC_UID"; else id -nu; fi; }
+
 # ------------------------------------------------------------------------------
 # Drivers (each one pulls all its related packages)
 # ------------------------------------------------------------------------------
 
 install_bluetooth() {
     log "Enabling Bluetooth support..."
-    curl -fsSL -o /tmp/bluetooth-enable.sh https://raw.githubusercontent.com/Neko-Void-Linux/bluetooth-enabler/refs/heads/main/install.sh \
+    # Pinned sha (no floating main); ln -sf + drop redundant `sv up` so a
+    # second run doesn't die on the existing /var/service link.
+    curl -fsSL -o /tmp/bluetooth-enable.sh https://raw.githubusercontent.com/Neko-Void-Linux/bluetooth-enabler/ac110dc3b861/install.sh \
+        && sed -i 's|^ln -s |ln -sf |; /^sv up /d' /tmp/bluetooth-enable.sh \
         && pkexec bash /tmp/bluetooth-enable.sh
 }
 
 install_printer() {
     log "Enabling Printer support..."
-    curl -fsSL -o /tmp/printer-enable.sh https://raw.githubusercontent.com/Neko-Void-Linux/printer-enable/refs/heads/main/enable.sh \
-        && pkexec bash /tmp/printer-enable.sh
+    # Pinned sha. Upstream `usermod $USER` hits root under pkexec, so the
+    # real invoking user is added here (idempotent).
+    curl -fsSL -o /tmp/printer-enable.sh https://raw.githubusercontent.com/Neko-Void-Linux/printer-enable/e57adc50612c/enable.sh \
+        && pkexec bash /tmp/printer-enable.sh \
+        && pkexec usermod -a -G lpadmin "$(_real_user)"
 }
 
 install_amd() {
@@ -320,38 +329,42 @@ install_intel() {
 # Función auxiliar para descargar el repositorio de nvidia-support
 download_nvidia_support() {
     log "Downloading NVIDIA support scripts..."
-    curl -fsSL -o /tmp/nvidia-support.tar.gz https://github.com/Neko-Void-Linux/nvidia-support/archive/refs/heads/main.tar.gz \
-        && tar -xzf /tmp/nvidia-support.tar.gz -C /tmp/
+    # Pinned sha (dir name carries the sha, resolved dynamically). Grub file
+    # is overwritten downstream, so keep one backup (never overwrite it).
+    curl -fsSL -o /tmp/nvidia-support.tar.gz https://github.com/Neko-Void-Linux/nvidia-support/archive/1e1ac7bafdbf.tar.gz \
+        && NVIDIR="/tmp/$(tar -tzf /tmp/nvidia-support.tar.gz | head -1 | cut -d/ -f1)" \
+        && tar -xzf /tmp/nvidia-support.tar.gz -C /tmp/ \
+        && { [ -e /etc/default/grub.neko-bak ] || pkexec cp -a /etc/default/grub /etc/default/grub.neko-bak; }
 }
 
 install_nvidia_open() {
     download_nvidia_support
     log "Installing NVIDIA (open kernel modules)..."
-    pkexec bash /tmp/nvidia-support-main/install.sh open
+    pkexec bash "$NVIDIR/install.sh" open
 }
 
 install_nvidia_latest() {
     download_nvidia_support
     log "Installing NVIDIA (proprietary, latest)..."
-    pkexec bash /tmp/nvidia-support-main/install.sh latest
+    pkexec bash "$NVIDIR/install.sh" latest
 }
 
 install_nvidia_580() {
     download_nvidia_support
     log "Installing NVIDIA (proprietary, 580 series)..."
-    pkexec bash /tmp/nvidia-support-main/install.sh 580
+    pkexec bash "$NVIDIR/install.sh" 580
 }
 
 install_nvidia_470() {
     download_nvidia_support
     log "Installing NVIDIA (proprietary, 470 series)..."
-    pkexec bash /tmp/nvidia-support-main/install.sh 470
+    pkexec bash "$NVIDIR/install.sh" 470
 }
 
 install_nvidia_390() {
     download_nvidia_support
     log "Installing NVIDIA (proprietary, 390 series)..."
-    pkexec bash /tmp/nvidia-support-main/install.sh 390
+    pkexec bash "$NVIDIR/install.sh" 390
 }
 
 
