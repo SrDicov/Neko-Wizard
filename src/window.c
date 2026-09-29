@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <stdio.h>
+#include <string.h>
 #include <stdarg.h>
 
 #ifdef GDK_WINDOWING_X11
@@ -85,7 +86,6 @@ struct _NekoStoreWindow {
 
     // Installer State
     GList *apps_to_install;
-    GList *current_installing;
     guint pulse_id;
     gboolean installing;
     int language;
@@ -258,54 +258,63 @@ static GtkWidget* create_app_group_page(NekoStoreWindow *self, const char *title
 }
 
 
-static void install_next_app(NekoStoreWindow *self);
-
 static gboolean pulse_progress_bar(gpointer user_data) {
     NekoStoreWindow *self = NEKO_STORE_WINDOW(user_data);
     gtk_progress_bar_pulse(GTK_PROGRESS_BAR(self->progress_bar));
     return G_SOURCE_CONTINUE;
 }
 
-static void install_finished_cb(gboolean success, gpointer user_data) {
-    NekoStoreWindow *self = NEKO_STORE_WINDOW(user_data);
+/* App-id is the trailing word of the per-app curl command ("... install.sh <id>"). */
+static const char *app_id_of(const AppInfo *info) {
+    const char *cmd = neko_app_command(info);
+    const char *sp = strrchr(cmd, ' ');
+    return sp ? sp + 1 : "";
+}
 
-    if (self->current_installing) {
-        AppInfo *info = (AppInfo *)self->current_installing->data;
-        info->install_success = success;
+static void mark_app(NekoStoreWindow *self, const char *id, gboolean ok) {
+    for (GList *l = self->apps_to_install; l != NULL; l = l->next) {
+        AppInfo *info = (AppInfo *)l->data;
+        if (g_str_equal(app_id_of(info), id)) {
+            info->install_success = ok;
+            char *status = g_strdup_printf("%s %s", ok ? "Installed" : "Failed:", info->name);
+            gtk_label_set_text(GTK_LABEL(self->status_label), status);
+            term_log("%s %s", ok ? "Installed" : "Failed:", info->name);
+            g_free(status);
+            return;
+        }
     }
-
-    self->current_installing = self->current_installing->next;
-    install_next_app(self);
 }
 
 static void install_progress_cb(const char *status_message, gpointer user_data) {
     NekoStoreWindow *self = NEKO_STORE_WINDOW(user_data);
-    if (status_message && g_utf8_validate(status_message, -1, NULL)) {
-        g_print("%s\n", status_message);
-        fflush(stdout);
-        char *trunc = g_strndup(status_message, 60);
-        gtk_label_set_text(GTK_LABEL(self->status_label), trunc);
-        g_free(trunc);
+    if (!status_message || !g_utf8_validate(status_message, -1, NULL))
+        return;
+    /* Batch markers from install.sh keep the per-app report on one session. */
+    if (g_str_has_prefix(status_message, "[neko] NEKO_OK ")) {
+        mark_app(self, status_message + strlen("[neko] NEKO_OK "), TRUE);
+        return;
     }
+    if (g_str_has_prefix(status_message, "[neko] NEKO_FAIL ")) {
+        mark_app(self, status_message + strlen("[neko] NEKO_FAIL "), FALSE);
+        return;
+    }
+    g_print("%s\n", status_message);
+    fflush(stdout);
+    char *trunc = g_strndup(status_message, 60);
+    gtk_label_set_text(GTK_LABEL(self->status_label), trunc);
+    g_free(trunc);
 }
 
-static void install_next_app(NekoStoreWindow *self) {
-    if (self->current_installing != NULL) {
-        AppInfo *info = (AppInfo *)self->current_installing->data;
-        char *status = g_strdup_printf("Installing %s...", info->name);
-        gtk_label_set_text(GTK_LABEL(self->status_label), status);
-        g_free(status);
-        term_log("Installing %s...", info->name);
-
-        install_app_async(neko_app_command(info), install_progress_cb, install_finished_cb, self);
-    } else {
-        // Finished everything
-        self->installing = FALSE;
-        if (self->pulse_id > 0) {
-            g_source_remove(self->pulse_id);
-            self->pulse_id = 0;
-        }
-        gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(self->progress_bar), 1.0);
+/* Single callback for the whole batch (mirror + update + every app, one pkexec). */
+static void batch_finished_cb(gboolean success, gpointer user_data) {
+    NekoStoreWindow *self = NEKO_STORE_WINDOW(user_data);
+    (void)success; /* per-app truth lives in install_success via NEKO_OK/FAIL */
+    self->installing = FALSE;
+    if (self->pulse_id > 0) {
+        g_source_remove(self->pulse_id);
+        self->pulse_id = 0;
+    }
+    gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(self->progress_bar), 1.0);
 
         GList *failed = NULL;
         for (GList *l = self->apps_to_install; l != NULL; l = l->next) {
@@ -329,28 +338,14 @@ static void install_next_app(NekoStoreWindow *self) {
         term_log("Neko Void is ready! you can close this window");
         gtk_label_set_text(GTK_LABEL(self->finished_label), "Neko Void is ready! you can close this window");
         gtk_label_set_text(GTK_LABEL(self->status_label), "All installations finished.");
-    }
-}
-
-static void system_update_finished_cb(gboolean success, gpointer user_data) {
-    NekoStoreWindow *self = NEKO_STORE_WINDOW(user_data);
-    if (!success) {
-        gtk_label_set_text(GTK_LABEL(self->status_label), "System update failed, continuing with apps...");
-        term_log("System update failed, continuing with apps...");
-    } else {
-        gtk_label_set_text(GTK_LABEL(self->status_label), "System update OK, installing apps...");
-        term_log("System update OK, installing apps...");
-    }
-    gtk_label_set_text(GTK_LABEL(self->finished_label), "Installing Apps...");
-    install_next_app(self);
 }
 
 static void on_install_selected_clicked(GtkButton *btn, gpointer user_data) {
     NekoStoreWindow *self = NEKO_STORE_WINDOW(user_data);
 
     // An install run is already in progress (the user can navigate back while
-    // apps are installing): starting a second chain would make both runs share
-    // current_installing and advance the same list, skipping apps.
+    // apps are installing): starting a second one would launch a second
+    // pkexec session over the same list.
     if (self->installing) {
         return;
     }
@@ -375,14 +370,32 @@ static void on_install_selected_clicked(GtkButton *btn, gpointer user_data) {
     gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(self->progress_bar), 0.0);
     self->pulse_id = g_timeout_add(100, pulse_progress_bar, self);
 
-    self->current_installing = self->apps_to_install;
-    char *status = g_strdup("Running pkexec xbps-install -Syu...");
+    /* One pkexec session: mirror + update + every app. `;` keeps apps going
+     * if the update fails (same as before); the script reports per-app
+     * NEKO_OK/FAIL markers parsed in install_progress_cb. */
+    GString *ids = g_string_new(NULL);
+    for (GList *l = self->apps_to_install; l != NULL; l = l->next)
+        g_string_append_printf(ids, " %s", app_id_of((AppInfo *)l->data));
+    char *mirror_part = self->selected_mirror
+        ? g_strdup_printf("xmirror --set '%s'; ", self->selected_mirror->url)
+        : g_strdup("");
+    char *apps_part = ids->len
+        ? g_strdup_printf("; bash /tmp/neko-install.sh%s", ids->str)
+        : g_strdup("");
+    char *command = g_strdup_printf(
+        "curl -fsSL -o /tmp/neko-install.sh %s && pkexec bash -c \"%sxbps-install -Syu%s\"",
+        neko_script_url(), mirror_part, apps_part);
+    char *status = g_strdup_printf("One password prompt: %d app(s)...", g_list_length(self->apps_to_install));
     gtk_label_set_text(GTK_LABEL(self->status_label), status);
     g_print("\n");
     term_log("Starting Neko Void setup with %d selected app(s)...", g_list_length(self->apps_to_install));
     term_log("%s", status);
     g_free(status);
-    install_app_async("pkexec xbps-install -y -Syu", install_progress_cb, system_update_finished_cb, self);
+    install_app_async(command, install_progress_cb, batch_finished_cb, self);
+    g_free(command);
+    g_free(mirror_part);
+    g_free(apps_part);
+    g_string_free(ids, TRUE);
 }
 
 static void on_about_clicked(GtkButton *btn, gpointer user_data) {
@@ -888,16 +901,6 @@ static void on_test_mirror_clicked(GtkButton *btn, gpointer user_data) {
     g_free(url);
 }
 
-static void on_mirror_set_finished_cb(gboolean success, gpointer user_data) {
-    NekoStoreWindow *self = NEKO_STORE_WINDOW(user_data);
-    if (self->selected_mirror && success) {
-        gtk_label_set_text(GTK_LABEL(self->mirror_status_label), "Mirror set successfully!");
-    } else {
-        gtk_label_set_text(GTK_LABEL(self->mirror_status_label), "Mirror configured. Continuing...");
-    }
-    gtk_stack_set_visible_child(GTK_STACK(self->stack), self->gaming_page);
-}
-
 static void on_mirror_next_clicked(GtkButton *btn, gpointer user_data) {
     NekoStoreWindow *self = NEKO_STORE_WINDOW(user_data);
 
@@ -906,10 +909,8 @@ static void on_mirror_next_clicked(GtkButton *btn, gpointer user_data) {
         return;
     }
 
-    char *command = g_strdup_printf("pkexec xmirror --set %s", self->selected_mirror->url);
-    gtk_label_set_text(GTK_LABEL(self->mirror_status_label), "Setting system mirror...");
-    install_app_async(command, test_progress_cb, on_mirror_set_finished_cb, self);
-    g_free(command);
+    /* No pkexec here: the mirror is applied inside the single install session. */
+    gtk_stack_set_visible_child(GTK_STACK(self->stack), self->gaming_page);
 }
 
 static void build_mirror_page(NekoStoreWindow *self);
