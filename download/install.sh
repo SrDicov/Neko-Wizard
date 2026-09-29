@@ -25,13 +25,6 @@ set -u
 log() { printf '[neko] %s\n' "$*"; }
 die() { printf '[neko] ERROR: %s\n' "$*" >&2; exit 1; }
 
-# Run a whole script under a single pkexec session. Flatpaks are installed
-# system-wide, so every flatpak command inside the script reuses the same
-# privileges and the polkit password prompt appears only once.
-as_root() {
-    pkexec bash -euc "$(cat)"
-}
-
 usage() {
     printf 'Neko-Wizard installer\n\n'
     printf 'Usage: bash %s <app-id>\n' "$0"
@@ -83,12 +76,9 @@ install_hytale() {
 }
 
 install_trinity() {
-    log "Installing Trinity Launcher (Flatpak)..."
-    flatpak remote-add --if-not-exists --user flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-    flatpak remote-add --if-not-exists --user trinity \
-    https://huggingface.co/datasets/ccoffee20/flatpak/resolve/main/com.trench.trinity.launcher.flatpakrepo
-    flatpak install --user flathub org.kde.Platform//6.10 io.qt.qtwebengine.BaseApp//6.10 -y
-    flatpak install --user trinity com.trench.trinity.launcher -y
+    # Same package name on Helix and Musl (user-provided repo).
+    log "Installing Trinity Launcher..."
+    pkexec xbps-install -Sy trinity-launcher-ap
 }
 
 install_prismlauncher() {
@@ -201,9 +191,9 @@ install_inkscape() {
 # ------------------------------------------------------------------------------
 
 install_spotify() {
-    log "Installing Spotify (Flatpak)..."
-    flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-    flatpak install --user flathub com.spotify.Client -y
+    # Helix: user-provided xbps package (not in official repos).
+    log "Installing Spotify..."
+    pkexec xbps-install -Sy spotify
 }
 
 install_vesktop() {
