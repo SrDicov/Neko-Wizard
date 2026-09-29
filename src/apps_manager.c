@@ -80,6 +80,10 @@ static AppInfo apps[] = {
     {"Telegram", "telegram.png", INSTALL_APP("telegram"), INSTALL_APP_MUSL("telegram"), GROUP_SOCIAL, FALSE, FALSE},
     {"Vivaldi", "vivaldi.png", INSTALL_APP("vivaldi"), INSTALL_APP_MUSL("vivaldi"), GROUP_SOCIAL, FALSE, FALSE},
     {"Chromium", "chromium.png", INSTALL_APP("chromium"), INSTALL_APP_MUSL("chromium"), GROUP_SOCIAL, FALSE, FALSE},
+    {"Brave Origin", "brave-origin.png", INSTALL_APP("brave-origin"), INSTALL_APP_MUSL("brave-origin"), GROUP_SOCIAL, FALSE, FALSE},
+    {"Helium", "helium-browser.png", INSTALL_APP("helium-browser"), INSTALL_APP_MUSL("helium-browser"), GROUP_SOCIAL, FALSE, FALSE},
+    {"LibreWolf", "librewolf.png", INSTALL_APP("librewolf"), INSTALL_APP_MUSL("librewolf"), GROUP_SOCIAL, FALSE, FALSE},
+    {"Zen Browser", "zen-browser.png", INSTALL_APP("zen-browser"), INSTALL_APP_MUSL("zen-browser"), GROUP_SOCIAL, FALSE, FALSE},
 
     // Text editing and documents
     {"OnlyOffice", "onlyoffice.png", INSTALL_APP("onlyoffice"), INSTALL_APP_MUSL("onlyoffice"), GROUP_TEXT_DOCUMENTS, FALSE, FALSE},

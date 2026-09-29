@@ -53,6 +53,7 @@ list_apps() {
         reaper obs kdenlive openshot vlc audacity ardour blender \
         krita gimp inkscape \
         spotify vesktop waterfox brave zerotierone telegram vivaldi chromium \
+        brave-origin helium-browser librewolf zen-browser \
         onlyoffice kate libreoffice \
         bluetooth printer amd intel nvidia-open nvidia-latest nvidia-580 nvidia-470 nvidia-390 \
         gufw
@@ -101,29 +102,8 @@ install_prismlauncher() {
 }
 
 install_pineconemc() {
-    # Batch runs as root: re-run just this user-level app as the invoking user.
-    if [ "$(id -u)" = 0 ] && [ -n "${PKEXEC_UID:-}" ]; then as_user bash "$0" __single pineconemc; return $?; fi
-    # PineconeMC ships as an AppImage; AppImageLauncher Lite integrates it into
-    # the desktop menu. Both are user-level (no pkexec needed).
-    local dir="$HOME/apps"
-    local launcher="$dir/appimagelauncher-lite.AppImage"
-    local pinecone="$dir/PineconeMC-Linux-x86_64.AppImage"
-
-    log "Downloading AppImageLauncher..."
-    mkdir -p "$dir" || die "Could not create $dir"
-    curl -fsSL -o "$launcher" \
-        "https://github.com/TheAssassin/AppImageLauncher/releases/download/v3.0.0-beta-3/appimagelauncher-lite-3.0.0-beta-2-gha287-x86_64.AppImage" \
-        || die "Failed to download AppImageLauncher"
-    chmod +x "$launcher"
-
-    log "Downloading PineconeMC..."
-    curl -fsSL -o "$pinecone" \
-        "https://github.com/ElyPrismLauncher/Launcher/releases/download/11.0.3/PineconeMC-Linux-x86_64.AppImage" \
-        || die "Failed to download PineconeMC"
-    chmod +x "$pinecone"
-
-    log "Integrating PineconeMC into the desktop (AppImageLauncher)..."
-    "$launcher" cli integrate "$pinecone"
+    log "Installing PineconeMC..."
+    pkexec xbps-install -Sy pineconemc-bin
 }
 
 install_protonup() {
@@ -141,13 +121,8 @@ install_faugus() {
 # ------------------------------------------------------------------------------
 
 install_reaper() {
-    # Tarball into ~/opt: user-level, re-run as the invoking user under batch.
-    if [ "$(id -u)" = 0 ] && [ -n "${PKEXEC_UID:-}" ]; then as_user bash "$0" __single reaper; return $?; fi
-    log "Installing Reaper (Tarball)..."
-    curl -L -o /tmp/reaper.tar.xz https://github.com/Neko-Void-Linux/Neko-Wizard/releases/download/tars/reaper779_linux_x86_64.tar.xz && \
-    tar -xf /tmp/reaper.tar.xz -C /tmp && \
-    cd /tmp/reaper_linux_x86_64 && \
-    sh install-reaper.sh --install ~/opt --integrate-user-desktop --quiet
+    log "Installing Reaper..."
+    pkexec xbps-install -Sy reaper-bin
 }
 
 install_obs() {
@@ -249,35 +224,33 @@ install_chromium() {
     pkexec xbps-install -Sy chromium
 }
 
+install_brave_origin() {
+    log "Installing Brave Origin..."
+    pkexec xbps-install -Sy brave-origin-bin
+}
+
+install_helium_browser() {
+    log "Installing Helium Browser..."
+    pkexec xbps-install -Sy helium-browser-bin
+}
+
+install_librewolf() {
+    log "Installing LibreWolf..."
+    pkexec xbps-install -Sy librewolf-bin
+}
+
+install_zen_browser() {
+    log "Installing Zen Browser..."
+    pkexec xbps-install -Sy zen-browser-bin
+}
+
 # ------------------------------------------------------------------------------
 # Text editing and documents
 # ------------------------------------------------------------------------------
 
 install_onlyoffice() {
-    # AppImage pair: user-level, re-run as the invoking user under batch.
-    if [ "$(id -u)" = 0 ] && [ -n "${PKEXEC_UID:-}" ]; then as_user bash "$0" __single onlyoffice; return $?; fi
-    # OnlyOffice ships as an AppImage; AppImageLauncher Lite integrates it into
-    # the desktop menu. Both are user-level (no pkexec needed).
-    # Note: "cli integrate" works without systemd (important on Void/runit).
-    local dir="$HOME/apps"
-    local launcher="$dir/appimagelauncher-lite.AppImage"
-    local editors="$dir/DesktopEditors-x86_64.AppImage"
-
-    log "Downloading AppImageLauncher..."
-    mkdir -p "$dir" || die "Could not create $dir"
-    curl -fsSL -o "$launcher" \
-        "https://github.com/TheAssassin/AppImageLauncher/releases/download/v3.0.0-beta-3/appimagelauncher-lite-3.0.0-beta-2-gha287-x86_64.AppImage" \
-        || die "Failed to download AppImageLauncher"
-    chmod +x "$launcher"
-
-    log "Downloading OnlyOffice..."
-    curl -fsSL -o "$editors" \
-        "https://github.com/ONLYOFFICE/appimage-desktopeditors/releases/download/v9.4.0/DesktopEditors-x86_64.AppImage" \
-        || die "Failed to download OnlyOffice"
-    chmod +x "$editors"
-
-    log "Integrating OnlyOffice into the desktop (AppImageLauncher)..."
-    "$launcher" cli integrate "$editors"
+    log "Installing OnlyOffice..."
+    pkexec xbps-install -Sy onlyoffice-bin
 }
 
 install_kate() {
@@ -417,6 +390,10 @@ case "${1:-}" in
     telegram)      install_telegram ;;
     vivaldi)       install_vivaldi ;;
     chromium)      install_chromium ;;
+    brave-origin)  install_brave_origin ;;
+    helium-browser) install_helium_browser ;;
+    librewolf)     install_librewolf ;;
+    zen-browser)   install_zen_browser ;;
 
     onlyoffice)    install_onlyoffice ;;
     kate)          install_kate ;;
