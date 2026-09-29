@@ -293,20 +293,29 @@ install_libreoffice() {
     pkexec xbps-install -Sy libreoffice
 }
 
+# Invoking user even inside the single-pkexec batch (where $USER is root).
+_real_user() { if [ -n "${PKEXEC_UID:-}" ]; then id -nu "$PKEXEC_UID"; else id -nu; fi; }
+
 # ------------------------------------------------------------------------------
 # Drivers (each one pulls all its related packages)
 # ------------------------------------------------------------------------------
 
 install_bluetooth() {
     log "Enabling Bluetooth support..."
-    curl -fsSL -o /tmp/bluetooth-enable.sh https://raw.githubusercontent.com/Neko-Void-Linux/bluetooth-enabler/refs/heads/main/install.sh \
+    # Pinned sha (no floating main); ln -sf + drop redundant `sv up` so a
+    # second run doesn't die on the existing /var/service link.
+    curl -fsSL -o /tmp/bluetooth-enable.sh https://raw.githubusercontent.com/Neko-Void-Linux/bluetooth-enabler/ac110dc3b861/install.sh \
+        && sed -i 's|^ln -s |ln -sf |; /^sv up /d' /tmp/bluetooth-enable.sh \
         && pkexec bash /tmp/bluetooth-enable.sh
 }
 
 install_printer() {
     log "Enabling Printer support..."
-    curl -fsSL -o /tmp/printer-enable.sh https://raw.githubusercontent.com/Neko-Void-Linux/printer-enable/refs/heads/main/enable.sh \
-        && pkexec bash /tmp/printer-enable.sh
+    # Pinned sha. Upstream `usermod $USER` hits root under pkexec, so the
+    # real invoking user is added here (idempotent).
+    curl -fsSL -o /tmp/printer-enable.sh https://raw.githubusercontent.com/Neko-Void-Linux/printer-enable/e57adc50612c/enable.sh \
+        && pkexec bash /tmp/printer-enable.sh \
+        && pkexec usermod -a -G lpadmin "$(_real_user)"
 }
 
 install_amd() {
