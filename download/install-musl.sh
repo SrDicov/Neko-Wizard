@@ -215,12 +215,12 @@ install_spotify() {
 
 install_vesktop() {
     log "Installing Vesktop..."
-    pkexec xbps-install -Sy vesktop
+    pkexec xbps-install -Sy vesktop-bin
 }
 
 install_waterfox() {
     log "Installing Waterfox..."
-    pkexec xbps-install -Sy waterfox
+    pkexec xbps-install -Sy waterfox-bin
 }
 
 install_brave() {

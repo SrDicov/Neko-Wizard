@@ -72,12 +72,12 @@ install_steam() {
 
 install_portproton() {
     log "Installing PortProton..."
-    pkexec xbps-install -Sy portproton
+    pkexec xbps-install -Sy portproton-bin
 }
 
 install_heroic() {
     log "Installing Heroic Games Launcher..."
-    pkexec xbps-install -Sy heroic-games
+    pkexec xbps-install -Sy heroic-games-bin
 }
 
 install_lutris() {
@@ -191,12 +191,12 @@ install_spotify() {
 
 install_vesktop() {
     log "Installing Vesktop..."
-    pkexec xbps-install -Sy vesktop
+    pkexec xbps-install -Sy vesktop-bin
 }
 
 install_waterfox() {
     log "Installing Waterfox..."
-    pkexec xbps-install -Sy waterfox
+    pkexec xbps-install -Sy waterfox-bin
 }
 
 install_brave() {
